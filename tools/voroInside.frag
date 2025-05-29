@@ -30,16 +30,6 @@ void main() {
 // Implement basic lighting using the normals
 // Refine material properties and lighting parameters
 // Add additional effects (specular, ambient occlusion, etc.)
-
-// Steps to Animate the Voronoi Pattern with Correct Normals and Lighting:
-
-// Modify the voronoiDistSq function to include animation
-// Update the getClosestCellInfo function to use the same animation parameters
-// Ensure the normal calculation uses animated values consistently
-// Adjust animation parameters for the inner Voronoi pattern
-// Fine-tune the animation speed and amplitude
-
-
 // fabrice -> https://www.shadertoy.com/view/4dKSDV
 
 vec3 voronoiDistSq(vec2 p, float dt)
@@ -51,14 +41,7 @@ vec3 voronoiDistSq(vec2 p, float dt)
     for (int k = 0; k < 9; ++k)
     {
         cellId = ceil(p) + vec2(k - (k/3)*3, k/3) - 2.0;
-        // Animation vector - create a consistent circular motion
-        vec2 animationOffset = 0.2 * vec2(
-            cos(dt + 6.28 * H(cellId).x),
-            sin(dt + 6.28 * H(cellId).y)
-        );
-        
-        // Apply animation to cell point calculation
-        diff = H(cellId) + cellId + animationOffset - p;
+        diff   = H(cellId) + cellId - p;
 
 
         d = dot(diff, diff);      
@@ -85,7 +68,7 @@ vec2 getLocalCoordinates(vec2 p, vec2 cellCenter) {
 }
 
 // First step: Identify cell center and cell ID for inner Voronoi
-vec4 getClosestCellInfo(vec2 p, float dt) {
+vec4 getClosestCellInfo(vec2 p) {
     vec2 bestCellId = vec2(0.0);
     vec2 bestCellPoint = vec2(0.0);
     float minDist = 100.0;
@@ -93,16 +76,7 @@ vec4 getClosestCellInfo(vec2 p, float dt) {
     // Check the 9 neighboring cells
     for (int k = 0; k < 9; ++k) {
         vec2 cellId = ceil(p) + vec2(k - (k/3)*3, k/3) - 2.0;
-        // vec2 cellPoint = H(cellId) + cellId;
-        // Use the same animation offset as in voronoiDistSq
-        vec2 animationOffset = 0.08 * vec2(
-            cos(dt + 6.28 * H(cellId).x),
-            sin(dt + 6.28 * H(cellId).y)
-        );
-        
-        // Apply animation to cell point calculation
-        vec2 cellPoint = H(cellId) + cellId + animationOffset;
-        
+        vec2 cellPoint = H(cellId) + cellId;
         
         float dist = length(cellPoint - p);
         
@@ -117,16 +91,36 @@ vec4 getClosestCellInfo(vec2 p, float dt) {
     return vec4(bestCellId, bestCellPoint);
 }
 
-float createHeightField(float primaryEdgeDist, float secondaryEdgeDist, float primaryDist) {
+// Step 3: Generate a secondary Voronoi in the local coordinate system
+vec3 secondaryVoronoi(vec2 localP) {
+    // Re-use the same voronoiDistSq function but with local coordinates
+    return voronoiDistSq(localP, 0.0); // Using fixed time for now
+}
 
-    float primaryEdgeHeight = 0.9;  
-    float secondaryEdgeHeight = 0.6;  
-    float baseHeight = 0.1;  
-    float primaryEdgeWidth = 0.2;  
-    float secondaryEdgeWidth = 0.12;  
+float heightAt(vec2 p, float dt)
+{
+    // vec3  d        = voronoiDistSq(p, dt);
+    vec3  d        = voronoiDistSq(p, dt);
+    float F1       = sqrt(d.x);
+    float F2       = sqrt(d.y);
+    float F3       = sqrt(d.z);
+    float edgeDiff = F2 - F1;               // ≥ 0, biggest at cell centre
+    float curvature = (F3 - F2) / F2;
+
+    // use a *positive* scale so height rises inward
+    return clamp( 5.5 * edgeDiff * curvature, 0.05, 1.0 );   // 0.8‒1.0 works well
+}
+
+float createHeightField(float primaryEdgeDist, float secondaryEdgeDist, float primaryDist) {
+    // Parameters for height field
+    float primaryEdgeHeight = 0.9;  // Height of primary edges
+    float secondaryEdgeHeight = 0.6;  // Height of secondary edges
+    float baseHeight = 0.1;  // Base height of the surface
+    float primaryEdgeWidth = 0.2;  // Width of primary edge elevation
+    float secondaryEdgeWidth = 0.1;  // Width of secondary edge elevation
     
     // Create height for primary edges - higher near edges
-    float primaryEdgeInfluence = 1.0 - smoothstep(0.1, primaryEdgeWidth, primaryEdgeDist);
+    float primaryEdgeInfluence = 1.0 - smoothstep(0.0, primaryEdgeWidth, primaryEdgeDist);
     float primaryHeight = mix(baseHeight, primaryEdgeHeight, primaryEdgeInfluence);
     
     // Create height for secondary edges - medium height near edges
@@ -138,42 +132,43 @@ float createHeightField(float primaryEdgeDist, float secondaryEdgeDist, float pr
     
     // Optional: Add some variation based on distance to primary cell center
     // This creates a subtle dome in the center of each cell
-    float centerBump = 0.1 * (1.0 - smoothstep(0.0, 0.8, primaryDist));
+    float centerBump = 0.1 * (1.0 - smoothstep(0.0, 0.5, primaryDist));
     
     return combinedHeight + centerBump;
 }
 
-// Step 3: Update calculateNormals to use animation parameters
-vec3 calculateNormals(vec2 uv, float scale, float dt) {
+// Step 2: Calculate surface normals from the height field
+vec3 calculateNormals(vec2 uv, float scale) {
+    // Use small offsets for numerical differentiation
     float eps = 0.01;
-    vec2 e = vec2(eps, 0.03);
+    vec2 e = vec2(eps, 0.0);
     
-    // Calculate animated heights with consistent time parameter
+    // Sample heights at nearby points
     float heightCenter = createHeightField(
-        sqrt(voronoiDistSq(uv * scale, dt).y) - sqrt(voronoiDistSq(uv * scale, dt).x),
-        sqrt(voronoiDistSq(getLocalCoordinates(uv, getClosestCellInfo(uv * scale, dt).zw / scale) + 
-             vec2(getClosestCellInfo(uv * scale, dt).xy * 0.1), dt * 0.5).y) - 
-        sqrt(voronoiDistSq(getLocalCoordinates(uv, getClosestCellInfo(uv * scale, dt).zw / scale) + 
-             vec2(getClosestCellInfo(uv * scale, dt).xy * 0.1), dt * 0.5).x),
-        sqrt(voronoiDistSq(uv * scale, dt).x)
+        sqrt(voronoiDistSq(uv * scale, 0.0).y) - sqrt(voronoiDistSq(uv * scale, 0.0).x),
+        sqrt(voronoiDistSq(getLocalCoordinates(uv, getClosestCellInfo(uv * scale).zw / scale) + 
+             vec2(getClosestCellInfo(uv * scale).xy * 0.1), 0.0).y) - 
+        sqrt(voronoiDistSq(getLocalCoordinates(uv, getClosestCellInfo(uv * scale).zw / scale) + 
+             vec2(getClosestCellInfo(uv * scale).xy * 0.1), 0.0).x),
+        sqrt(voronoiDistSq(uv * scale, 0.0).x)
     );
     
     float heightX = createHeightField(
-        sqrt(voronoiDistSq((uv + e.xy) * scale, dt).y) - sqrt(voronoiDistSq((uv + e.xy) * scale, dt).x),
-        sqrt(voronoiDistSq(getLocalCoordinates(uv + e.xy, getClosestCellInfo((uv + e.xy) * scale, dt).zw / scale) + 
-             vec2(getClosestCellInfo((uv + e.xy) * scale, dt).xy * 0.1), dt * 0.5).y) - 
-        sqrt(voronoiDistSq(getLocalCoordinates(uv + e.xy, getClosestCellInfo((uv + e.xy) * scale, dt).zw / scale) + 
-             vec2(getClosestCellInfo((uv + e.xy) * scale, dt).xy * 0.1), dt * 0.5).x),
-        sqrt(voronoiDistSq((uv + e.xy) * scale, dt).x)
+        sqrt(voronoiDistSq((uv + e.xy) * scale, 0.0).y) - sqrt(voronoiDistSq((uv + e.xy) * scale, 0.0).x),
+        sqrt(voronoiDistSq(getLocalCoordinates(uv + e.xy, getClosestCellInfo((uv + e.xy) * scale).zw / scale) + 
+             vec2(getClosestCellInfo((uv + e.xy) * scale).xy * 0.1), 0.0).y) - 
+        sqrt(voronoiDistSq(getLocalCoordinates(uv + e.xy, getClosestCellInfo((uv + e.xy) * scale).zw / scale) + 
+             vec2(getClosestCellInfo((uv + e.xy) * scale).xy * 0.1), 0.0).x),
+        sqrt(voronoiDistSq((uv + e.xy) * scale, 0.0).x)
     );
     
     float heightY = createHeightField(
-        sqrt(voronoiDistSq((uv + e.yx) * scale, dt).y) - sqrt(voronoiDistSq((uv + e.yx) * scale, dt).x),
-        sqrt(voronoiDistSq(getLocalCoordinates(uv + e.yx, getClosestCellInfo((uv + e.yx) * scale, dt).zw / scale) + 
-             vec2(getClosestCellInfo((uv + e.yx) * scale, dt).xy * 0.1), dt * 0.5).y) - 
-        sqrt(voronoiDistSq(getLocalCoordinates(uv + e.yx, getClosestCellInfo((uv + e.yx) * scale, dt).zw / scale) + 
-             vec2(getClosestCellInfo((uv + e.yx) * scale, dt).xy * 0.1), dt * 0.5).x),
-        sqrt(voronoiDistSq((uv + e.yx) * scale, dt).x)
+        sqrt(voronoiDistSq((uv + e.yx) * scale, 0.0).y) - sqrt(voronoiDistSq((uv + e.yx) * scale, 0.0).x),
+        sqrt(voronoiDistSq(getLocalCoordinates(uv + e.yx, getClosestCellInfo((uv + e.yx) * scale).zw / scale) + 
+             vec2(getClosestCellInfo((uv + e.yx) * scale).xy * 0.1), 0.0).y) - 
+        sqrt(voronoiDistSq(getLocalCoordinates(uv + e.yx, getClosestCellInfo((uv + e.yx) * scale).zw / scale) + 
+             vec2(getClosestCellInfo((uv + e.yx) * scale).xy * 0.1), 0.0).x),
+        sqrt(voronoiDistSq((uv + e.yx) * scale, 0.0).x)
     );
     
     // Calculate the normal using the gradient
@@ -186,40 +181,24 @@ vec3 calculateNormals(vec2 uv, float scale, float dt) {
 }
 
 // Step 3: Implement basic lighting
-// Enhanced lighting calculation
 vec3 calculateLighting(vec3 normal, float height) {
-    // Define multiple light directions for more interesting lighting
-    vec3 lightDir1 = normalize(vec3(0.4, 0.5, 0.8));  // Main light
-    vec3 lightDir2 = normalize(vec3(-0.3, -0.2, 0.6));  // Secondary light
+    // Define a light direction (can be animated if desired)
+    vec3 lightDir = normalize(vec3(0.5, 0.5, 1.0));
     
-    // Enhanced material properties
-    vec3 baseColor = vec3(0.9, 0.95, 0.98);  // Slightly blue-tinted white for base
-    vec3 edgeColor = vec3(0.15, 0.15, 0.3);   // Dark blue-tinted color for edges
-    vec3 highlightColor = vec3(0.9, 0.9, 0.9);  // Pure white for highlights
+    // Basic material properties
+    vec3 baseColor = vec3(0.9);  // Off-white base color
+    vec3 edgeColor = vec3(0.3);  // Darker color for edges
     
-    // Diffuse lighting from two light sources
-    float diffuse1 = max(0.0, dot(normal, lightDir1));
-    float diffuse2 = max(0.0, dot(normal, lightDir2)) * 0.5;  // Secondary light is weaker
-    
-    // Specular lighting (Blinn-Phong model)
-    vec3 viewDir = normalize(vec3(0.0, 0.0, 1.0));  // Camera is looking down the z-axis
-    vec3 halfVector1 = normalize(lightDir1 + viewDir);
-    float specular1 = pow(max(0.0, dot(normal, halfVector1)), 32.0) * 0.6;
-    
-    // Ambient occlusion effect based on height
-    // Lower areas (valleys) receive less ambient light
-    float ao = mix(0.5, 1.0, smoothstep(0.1, 0.6, height));
+    // Basic lighting calculation
+    float diffuse = max(0.0, dot(normal, lightDir));
     
     // Mix between base color and edge color based on height
     // Higher areas (edges) get the edge color
-    vec3 surfaceColor = mix(baseColor, edgeColor, smoothstep(0.2, 0.7, height));
+    vec3 surfaceColor = mix(baseColor, edgeColor, smoothstep(0.1, 0.6, height));
     
-    // Apply ambient, diffuse, and specular lighting
-    float ambient = 0.25;
-    vec3 finalColor = surfaceColor * (ambient * ao + diffuse1 + diffuse2);
-    
-    // Add specular highlights (stronger on edges)
-    finalColor += highlightColor * specular1 * smoothstep(0.4, 0.8, height);
+    // Apply ambient and diffuse lighting
+    float ambient = 0.3;
+    vec3 finalColor = surfaceColor * (ambient + diffuse);
     
     return finalColor;
 }
@@ -230,12 +209,12 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
     float dt = u_time;
     vec2 mouse = u_mouse.xy / iResolution.xy;
     vec2 uv = 6.0 * (fragCoord + fragCoord - iResolution.xy) / iResolution.y;// + dt * 0.01;   
-
+    
     float scale = 0.6;
     vec3 d1 = voronoiDistSq(uv * scale, dt);
     
     // Get the cell ID and cell center for the current point
-    vec4 cellInfo = getClosestCellInfo(uv * scale, dt);
+    vec4 cellInfo = getClosestCellInfo(uv * scale);
     vec2 cellId = cellInfo.xy;
     vec2 cellCenter = cellInfo.zw / scale;
     
@@ -250,19 +229,16 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
     float primaryEdgeDist = sqrt(d1.y) - sqrt(d1.x);
     float secondaryDist = sqrt(d2.x);
     float secondaryEdgeDist = sqrt(d2.y) - sqrt(d2.x);
-    float primaryCellInfluence = smoothstep(0.0, 1.0, primaryEdgeDist);
+    float primaryCellInfluence = smoothstep(0.0, 0.9, primaryEdgeDist);
     
     // Calculate height field
     float height = createHeightField(primaryEdgeDist, secondaryEdgeDist * primaryCellInfluence, primaryDist);
     
     // Calculate surface normals
-    vec3 normal = calculateNormals(uv, scale, dt);
+    vec3 normal = calculateNormals(uv, scale);
     
     // Calculate lighting
     vec3 finalColor = calculateLighting(normal, height);
-
-    // float vignette = 1.0 - smoothstep(0.5, 1.5, length((fragCoord / iResolution.xy - 0.5) * 1.0));
-    // finalColor *= mix(0.8, 1.0, vignette);
 
     fragColor = vec4( finalColor, 1.0 );
 }
@@ -603,4 +579,171 @@ glslViewer kuko-16.frag -w 1080 -h 1920 --headless \
   -movflags +faststart \
   kuko-9.mp4
 
-*/
+
+  #version 120
+#ifdef GL_ES
+precision highp float;
+#endif
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec2 u_mouse;
+uniform sampler2D u_text0;
+#define PI 3.14159265358979323846
+#define TWO_PI 6.28318530718
+#define ANIMATE
+#define H(n)  fract( 1e4 * sin( n.x+n.y/.7 +vec2(1,12.34)  ) )
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord);
+
+void main() {
+    mainImage(gl_FragColor, gl_FragCoord.xy);
+}
+
+// fabrice -> https://www.shadertoy.com/view/4dKSDV
+float rand(vec2 p) {                  // cheap 2‑D hash → [0,1)
+    return fract(sin(dot(p, vec2(27.13, 91.17))) * 43758.5453);
+}
+
+vec3 voronoiVarRadius(vec2 p, float dt) {
+    vec2  base   = floor(p);         
+    vec3  dists  = vec3(9.0); 
+    float differ;       
+
+    for(int j = -3; j <= 3; ++j)
+    for(int i = -3; i <= 3; ++i) {
+        vec2 cell  = base + vec2(i, j);         
+        vec2 site  = cell + H(cell) + 0.08 * sin(dt + 6.28 * H(cell));            
+        float r    = mix(0.5, 3.0, rand(cell) ); 
+
+        differ = length(p - site) - r;         
+        differ *= differ;                                 
+
+        differ < dists.x ? (dists.yz = dists.xy, dists.x = differ) :
+        differ < dists.y ? (dists.z  = dists.y , dists.y = differ) :
+        differ < dists.z ?                dists.z = differ  :
+                       differ;
+    }
+    return dists;   // x = F1², y = F2², z = F3²
+}
+
+vec3 voronoiDistSq(vec2 p, float dt)
+{
+    vec2 cellId, diff;
+    float d;
+    vec3 dists = vec3(9.0);       
+
+    for (int k = 0; k < 9; ++k)
+    {
+        cellId = ceil(p) + vec2(k - (k/3)*3, k/3) - 2.0;
+        // diff   = H(cellId) + cellId - p;
+        diff = H(cellId) + cellId + 0.08 * cos(dt + 6.28 * H(cellId)) - p;
+
+        d = dot(diff, diff);      
+
+        d < dists.x ? (dists.yz = dists.xy, dists.x = d) :
+        d < dists.y ? (dists.z  = dists.y , dists.y = d) :
+        d < dists.z ?               dists.z = d        :
+                       d;
+    }
+    return dists;
+}
+
+
+vec3 pal( in float t, in vec3 a, in vec3 b, in vec3 c, in vec3 d )
+{
+    return a + b*cos( 6.28318*(c*t+d) );
+}
+
+void colorPalette(int effectIndex, vec2 uv, out vec3 bg, out vec3 rgbColor){
+    float hue = mod(uv.y / 0.6 + uv.x, 1.0);
+    
+    bg = vec3(0.3631,0.5847,0.6969);
+    rgbColor = pal(uv.y,vec3(0.129,0.404,0.49),vec3(0.153,0.024,0.002),vec3(0.169,0.514,0.549),vec3(0.153,0.424,0.502) );
+}
+
+float heightAt(vec2 p, float dt)
+{
+    // vec3  d        = voronoiDistSq(p, dt);
+    vec3  d        = voronoiDistSq(p, dt);
+    float F1       = sqrt(d.x);
+    float F2       = sqrt(d.y);
+    float F3       = sqrt(d.z);
+    float edgeDiff = F2 - F1;               // ≥ 0, biggest at cell centre
+    float curvature = (F3 - F2) / F2;
+
+    // use a *positive* scale so height rises inward
+    return clamp( 5.5 * edgeDiff * curvature, 0.05, 1.0 );   // 0.8‒1.0 works well
+}
+
+int effectIndex = 0;
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    vec2 iResolution = u_resolution;
+    float dt = u_time;
+    vec2 mouse = u_mouse.xy / iResolution.xy;
+    vec2 uv = 2.0 * (fragCoord + fragCoord - iResolution.xy) / iResolution.y;
+    uv.x += dt * 0.1;   
+
+    float scale2 = floor(rand(iResolution.xy) * 1.0) + 2.5;
+    vec3 d1 = voronoiDistSq(uv * 1.0, dt);  
+    vec3 d2 = voronoiVarRadius(uv * scale2, dt);  
+
+
+    float w   = 3.0;
+    float edgeDist = sqrt(d1.y) - sqrt(d1.x);
+    float mask = smoothstep( w, 0.0, edgeDist ) *
+                 smoothstep(-w, 3.0, -edgeDist);   
+
+    float F1 = sqrt(d2.x);
+    float F2 = sqrt(d2.y);
+    float F3 = sqrt(d2.z);
+
+    float edgeWidth = F2 - F1;
+    float curvature = (F3 - F2) / F2;
+
+    // approximate the gradient to fake the  normal
+    float eps = 10.0 / iResolution.x * -5.3;
+    float ho = heightAt(d2.xy, dt);
+    
+    float dhx = heightAt(uv + vec2(eps, 0.0), dt) - ho;
+    float dhy = heightAt(uv + vec2(0.0, eps), dt) - ho;
+    vec3 normal = normalize( vec3(dhx, dhy, 0.02 ) );
+
+    // per pixel lightning 
+    vec3 lightDir = normalize(vec3(0.1, 0.4, 0.5));
+    vec3 viewDir = vec3(0.4, 0.1, 1.0); 
+    
+    float diffuse = max( dot(normal, lightDir), 0.0);
+
+    vec3 reflextDir = reflect( -lightDir, normal);
+    float specular = pow( max( dot(reflextDir, viewDir), 0.0), 64.0);
+
+    float rim = pow(1.0 - normal.z, 4.0);
+
+    vec3 col1 = 2.4 * sqrt(d1);
+    col1 -= vec3(col1.x);
+    col1 += 8.0 * ( col1.y / (col1.y / col1.z + 1.0) - 0.5 ) - col1;
+
+    vec3 col2 = 20.0 * sqrt(d2);
+    col2 -= vec3(col2.x);
+    col2 += 5.0 * ( col2.y / (col2.y / col2.z + 1.0) - 0.5 ) - col2;
+
+    vec3 finalColor = mix( col1, col2, mask );
+    /*–‑‑ colors –‑‑*/
+//     vec3 bg, rgbColor;
+//     effectIndex = int(mod(dt / 10.0, 6.0));
+//     colorPalette(effectIndex, uv, bg, rgbColor);
+
+//     vec3 colorGrad =  rgbColor * diffuse * finalColor
+//            + vec3(1.0) * specular 
+//            +   rgbColor * rim * 0.3; 
+//     float alpha = smoothstep(-0.003, 0.003, F1);
+//     vec3 color = mix(bg,colorGrad,  alpha);
+
+//     fragColor = vec4( color, 1.0 );
+//     // fragColor = vec4(normal * 0.5 + 0.5, 1.0); // check if normals look valid
+
+// }
+
+
