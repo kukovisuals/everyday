@@ -1,0 +1,64 @@
+Here’s a tight checklist of shader types that make a Meta/Reality Labs recruiter think “ready for XR production.” Aim for 6–8 polished pieces total.
+
+**1) Core real-time lighting (PBR)**
+
+* GGX + IBL, punctual lights, shadowing, specular AA, cheap clearcoat/aniso variants.
+* Mobile-ready versions with packed masks (R: metal, G: rough, B: AO).
+
+**2) Fabric/skin “hero” materials**
+
+* Thin-layer SSS (wrap lighting/thickness map) and anisotropic fabric (warp/weft).
+* Great for wearables—show tiling control + mip/normal filtering done right.
+
+**3) Transparent & water**
+
+* Order-independent-ish transparency workaround, refraction, Fresnel, foam/rim.
+* Show a cheap VR-safe water (no heavy screen gathers).
+
+**4) Volumetrics & fog**
+
+* Height fog, light shafts, cheap volumetric scattering; demonstrate temporal stability.
+
+**5) NPR/Stylistic**
+
+* Toon/matcap/cel with banding AA, outlines (Sobel or depth/normal-based) and ramp control.
+
+**6) Procedural/SDF modeling**
+
+* SDF blend ops (smin), AO/soft shadows, curvature; one organic piece (your capsule-coral is perfect).
+* Stress test with repetition + your AA fixes (FXAA/SMAA + fwidth tricks).
+
+**7) Particles & flow fields**
+
+* GPU-friendly update (vertex/TF or texture buffers), curl noise advection, signed distance collisions.
+* One “biology/organisms” VFX fits your style.
+
+**8) Deformation & shading in the vertex stage**
+
+* Skinning/morphs, wind/bend, distance-based LOD swaps with stable shading.
+
+**9) Post-process fundamentals**
+
+* Tonemapping (ACES), bloom, color grading LUT, FXAA/SMAA; explain why TAA is tricky in VR.
+
+**10) XR specifics (critical)**
+
+* Single-pass stereo/multiview demo, fixed-foveated/variable rate shading aware materials.
+* Mobile constraints: 90/120 Hz on Quest targets, texture/mem budgets, MSAA vs bandwidth tradeoffs.
+
+**11) Environment shaders**
+
+* Triplanar with world-space UVs, detail normal/roughness, baked light probe support.
+* Dithered alpha for foliage (Temporal-stable pattern).
+
+**12) Tools & debug views (small but pro)**
+
+* Albedo/rough/metal/normal isolators, UV checker, wireframe, overdraw heatmap.
+
+**Presentation tips (make each piece “hireable”):**
+
+* 30–60s capture + a 1-page breakdown: goals, key tricks, perf numbers (Quest-like), texture counts, keyword variants.
+* Show **before/after** on aliasing, mip/normal filtering, and perf (draw calls, GPU time).
+* Include GLSL source excerpts (readable), plus Unity/Three.js integration notes if relevant.
+
+If you want, I can curate your existing shaders into this grid and call out the two gaps with the biggest ROI (likely: **fabric anisotropy** and **stereo/multiview demo**).
